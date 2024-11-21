@@ -21,6 +21,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Check secrets
+        run: |
+          echo "检查 secrets 配置..."
+          echo "WEBHOOK_UIKIT: ${{ secrets.WEBHOOK_UIKIT != '' }}"
+          echo "API_KEY_UIKIT: ${{ secrets.API_KEY_UIKIT != '' }}"
+          echo "WEBHOOK_ZIM: ${{ secrets.WEBHOOK_ZIM != '' }}"
+          echo "API_KEY_ZIM: ${{ secrets.API_KEY_ZIM != '' }}"
+
       - name: Load user mapping
         id: mapping
         run: |
@@ -45,8 +53,17 @@ jobs:
           WEBHOOK_ZIM: ${{ secrets.WEBHOOK_ZIM }}
           API_KEY_ZIM: ${{ secrets.API_KEY_ZIM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_CREATOR: ${{ github.event.pull_request.user.login }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
         run: |
           echo "开始处理PR通知..."
+          echo "环境变量检查:"
+          echo "WEBHOOK_UIKIT 是否设置: ${WEBHOOK_UIKIT:+true}"
+          echo "API_KEY_UIKIT 是否设置: ${API_KEY_UIKIT:+true}"
           
           # 打印事件信息
           echo "事件类型: ${{ github.event_name }}"
