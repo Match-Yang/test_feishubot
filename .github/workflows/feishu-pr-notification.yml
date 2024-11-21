@@ -1,6 +1,5 @@
 name: PR Notification to Feishu
 
-# 添加权限设置
 permissions:
   contents: read
   pull-requests: write
@@ -17,7 +16,6 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    # 添加条件，允许从 fork 的仓库运行
     if: github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout code
@@ -26,32 +24,48 @@ jobs:
       - name: Load user mapping
         id: mapping
         run: |
-          # 读取用户映射并转换为环境变量
-          while IFS=: read -r github_user feishu_id || [ -n "$github_user" ]; do
-            # 跳过注释行和空行
-            [[ $github_user =~ ^#.*$ || -z $github_user ]] && continue
-            # 去除多余空格和引号
-            github_user=$(echo $github_user | tr -d ' "')
-            feishu_id=$(echo $feishu_id | tr -d ' "')
-            echo "FEISHU_${github_user}=${feishu_id}" >> $GITHUB_ENV
-          done < .github/configs/user_mapping.yml
+          echo "开始加载用户映射..."
+          if [ -f .github/configs/user_mapping.yml ]; then
+            cat .github/configs/user_mapping.yml
+            while IFS=: read -r github_user feishu_id || [ -n "$github_user" ]; do
+              [[ $github_user =~ ^#.*$ || -z $github_user ]] && continue
+              github_user=$(echo $github_user | tr -d ' "')
+              feishu_id=$(echo $feishu_id | tr -d ' "')
+              echo "映射: GitHub用户 ${github_user} -> 飞书用户 ${feishu_id}"
+              echo "FEISHU_${github_user}=${feishu_id}" >> $GITHUB_ENV
+            done < .github/configs/user_mapping.yml
+          else
+            echo "警告: 用户映射文件不存在"
+          fi
 
       - name: Send notification
         env:
           WEBHOOK_UIKIT: ${{ secrets.WEBHOOK_UIKIT }}
+          API_KEY_UIKIT: ${{ secrets.API_KEY_UIKIT }}
           WEBHOOK_ZIM: ${{ secrets.WEBHOOK_ZIM }}
+          API_KEY_ZIM: ${{ secrets.API_KEY_ZIM }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "开始处理PR通知..."
+          
+          # 打印事件信息
+          echo "事件类型: ${{ github.event_name }}"
+          echo "事件动作: ${{ github.event.action }}"
+          
           # 获取PR信息
           PR_TITLE="${{ github.event.pull_request.title }}"
           PR_URL="${{ github.event.pull_request.html_url }}"
           PR_BODY="${{ github.event.pull_request.body }}"
           GITHUB_USER="${{ github.event.pull_request.user.login }}"
           
-          # 获取对应的飞书用户ID
+          echo "PR标题: ${PR_TITLE}"
+          echo "PR链接: ${PR_URL}"
+          echo "PR创建者: ${GITHUB_USER}"
+          
           FEISHU_USER_VAR="FEISHU_${GITHUB_USER}"
           FEISHU_USER_ID="${!FEISHU_USER_VAR:-$GITHUB_USER}"
+          echo "对应的飞书用户ID: ${FEISHU_USER_ID}"
           
-          # 确定PR状态
           if [[ "${{ github.event.action }}" == "opened" ]]; then
             STATUS="新建PR"
           elif [[ "${{ github.event.action }}" == "synchronize" ]]; then
@@ -63,8 +77,10 @@ jobs:
               STATUS="关闭PR"
             fi
           fi
+          echo "PR状态: ${STATUS}"
           
-          # 构建消息内容
+          # 构建消息卡片
+          echo "构建消息卡片..."
           MESSAGE_CARD=$(cat << EOF
           {
             "msg_type": "interactive",
@@ -107,37 +123,71 @@ jobs:
           EOF
           )
           
-          # 检查变更文件并发送通知
+          echo "获取变更文件列表..."
           changed_files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename')
+          echo "变更文件列表:"
+          echo "$changed_files"
           
-          # 初始化通知标志
           notify_uikit=false
           notify_zim=false
           
-          # 检查每个文件
+          echo "检查文件变更范围..."
           while IFS= read -r file; do
+            echo "检查文件: $file"
             if [[ $file == uikit/* ]]; then
+              echo "发现 UIKit 相关变更"
               notify_uikit=true
             elif [[ $file == core_products/zim/* ]]; then
+              echo "发现 ZIM 相关变更"
               notify_zim=true
             fi
           done <<< "$changed_files"
           
-          # 发送通知
           send_notification() {
             local webhook_url="$1"
-            curl -X POST -H "Content-Type: application/json" \
+            local api_key="$2"
+            local team="$3"
+            
+            echo "准备发送通知到 ${team} 团队..."
+            
+            # 生成时间戳
+            timestamp=$(date +%s)
+            echo "时间戳: ${timestamp}"
+            
+            # 生成签名字符串
+            string_to_sign="${timestamp}\n${api_key}"
+            
+            # 使用 API_KEY 生成签名
+            sign=$(echo -n "$string_to_sign" | openssl base64 -A | openssl dgst -sha256 -hmac "$api_key" -binary | openssl base64 -A)
+            echo "签名已生成"
+            
+            # 发送请求
+            echo "发送请求到飞书机器人..."
+            response=$(curl -X POST \
+                 -H "Content-Type: application/json" \
+                 -H "X-Lark-Request-Timestamp: ${timestamp}" \
+                 -H "X-Lark-Sign: ${sign}" \
                  -d "$MESSAGE_CARD" \
-                 "$webhook_url"
+                 "$webhook_url")
+            echo "飞书响应: $response"
           }
           
-          # 根据变更发送到相应的机器人
-          if [[ $notify_uikit == true && -n $WEBHOOK_UIKIT ]]; then
-            send_notification "$WEBHOOK_UIKIT"
+          if [[ $notify_uikit == true && -n $WEBHOOK_UIKIT && -n $API_KEY_UIKIT ]]; then
+            echo "发送通知到 UIKit 团队..."
+            send_notification "$WEBHOOK_UIKIT" "$API_KEY_UIKIT" "UIKit"
+          else
+            echo "跳过 UIKit 团队通知"
+            [[ $notify_uikit == false ]] && echo "原因: 没有相关变更"
+            [[ -z $WEBHOOK_UIKIT ]] && echo "原因: 缺少 WEBHOOK_UIKIT"
+            [[ -z $API_KEY_UIKIT ]] && echo "原因: 缺少 API_KEY_UIKIT"
           fi
           
-          if [[ $notify_zim == true && -n $WEBHOOK_ZIM ]]; then
-            send_notification "$WEBHOOK_ZIM"
+          if [[ $notify_zim == true && -n $WEBHOOK_ZIM && -n $API_KEY_ZIM ]]; then
+            echo "发送通知到 ZIM 团队..."
+            send_notification "$WEBHOOK_ZIM" "$API_KEY_ZIM" "ZIM"
+          else
+            echo "跳过 ZIM 团队通知"
+            [[ $notify_zim == false ]] && echo "原因: 没有相关变更"
+            [[ -z $WEBHOOK_ZIM ]] && echo "原因: 缺少 WEBHOOK_ZIM"
+            [[ -z $API_KEY_ZIM ]] && echo "原因: 缺少 API_KEY_ZIM"
           fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
