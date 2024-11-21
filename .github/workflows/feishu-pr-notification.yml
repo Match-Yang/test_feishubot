@@ -1,5 +1,10 @@
 name: PR Notification to Feishu
 
+# 添加权限设置
+permissions:
+  contents: read
+  pull-requests: write
+
 on:
   pull_request:
     types: [opened, synchronize, closed]
@@ -12,6 +17,8 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
+    # 添加条件，允许从 fork 的仓库运行
+    if: github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
