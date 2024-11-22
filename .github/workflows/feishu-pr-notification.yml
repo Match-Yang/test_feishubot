@@ -81,8 +81,14 @@ jobs:
           echo "PR创建者: ${GITHUB_USER}"
           
           FEISHU_USER_VAR="FEISHU_${GITHUB_USER}"
-          FEISHU_USER_ID="${!FEISHU_USER_VAR:-$GITHUB_USER}"
-          echo "对应的飞书用户ID: ${FEISHU_USER_ID}"
+          FEISHU_USER_ID="${!FEISHU_USER_VAR}"
+          
+          # 根据是否有飞书用户ID来决定是否使用at标记
+          if [[ -n "${FEISHU_USER_ID}" ]]; then
+            CREATOR_TEXT="**创建者**: <at id=${FEISHU_USER_ID}></at>"
+          else
+            CREATOR_TEXT="**创建者**: ${GITHUB_USER}"
+          fi
           
           # 根据不同事件类型设置状态和内容
           if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
@@ -101,7 +107,13 @@ jobs:
           elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
             REVIEWER="${{ github.event.review.user.login }}"
             REVIEWER_VAR="FEISHU_${REVIEWER}"
-            REVIEWER_ID="${!REVIEWER_VAR:-$REVIEWER}"
+            REVIEWER_ID="${!REVIEWER_VAR}"
+            
+            if [[ -n "${REVIEWER_ID}" ]]; then
+              REVIEWER_TEXT="**评审者**: <at id=${REVIEWER_ID}></at>"
+            else
+              REVIEWER_TEXT="**评审者**: ${REVIEWER}"
+            fi
             
             if [[ "${{ github.event.review.state }}" == "approved" ]]; then
               STATUS="👍 审核通过"
@@ -110,13 +122,20 @@ jobs:
             elif [[ "${{ github.event.review.state }}" == "commented" ]]; then
               STATUS="💬 收到评审意见"
             fi
-            EXTRA_CONTENT="\n**评审者**: <at id=${REVIEWER_ID}></at>\n**评审意见**: ${REVIEW_BODY}"
+            EXTRA_CONTENT="\n${REVIEWER_TEXT}\n**评审意见**: ${REVIEW_BODY}"
           elif [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
             COMMENTER="${{ github.event.comment.user.login }}"
             COMMENTER_VAR="FEISHU_${COMMENTER}"
-            COMMENTER_ID="${!COMMENTER_VAR:-$COMMENTER}"
+            COMMENTER_ID="${!COMMENTER_VAR}"
+            
+            if [[ -n "${COMMENTER_ID}" ]]; then
+              COMMENTER_TEXT="**评论者**: <at id=${COMMENTER_ID}></at>"
+            else
+              COMMENTER_TEXT="**评论者**: ${COMMENTER}"
+            fi
+            
             STATUS="💬 收到评论"
-            EXTRA_CONTENT="\n**评论者**: <at id=${COMMENTER_ID}></at>\n**评论内容**: ${COMMENT_BODY}"
+            EXTRA_CONTENT="\n${COMMENTER_TEXT}\n**评论内容**: ${COMMENT_BODY}"
           elif [[ "${{ github.event_name }}" == "push" ]]; then
             STATUS="🔨 推送到主分支"
             EXTRA_CONTENT="\n**分支**: main"
@@ -126,7 +145,7 @@ jobs:
           fi
           
           # 构建消息内容
-          CONTENT="**状态**: ${STATUS}\n**创建者**: <at id=${FEISHU_USER_ID}></at>${EXTRA_CONTENT}"
+          CONTENT="**状态**: ${STATUS}\n${CREATOR_TEXT}${EXTRA_CONTENT}"
           
           # 更新消息卡片中的内容
           MESSAGE_CARD=$(cat << EOF
@@ -148,7 +167,7 @@ jobs:
                   "tag": "div",
                   "text": {
                     "tag": "lark_md",
-                    "content": "**状态**: ${STATUS}\n**创建者**: <at id=${FEISHU_USER_ID}></at>${EXTRA_CONTENT}"
+                    "content": "**状态**: ${STATUS}\n${CREATOR_TEXT}${EXTRA_CONTENT}"
                   }
                 },
                 {
