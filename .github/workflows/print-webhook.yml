@@ -1,0 +1,14 @@
+name: 打印 Webhook 环境变量
+
+on:
+  push:
+    branches:
+      - '**'  # 匹配所有分支
+
+jobs:
+  print-env:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查 Webhook 环境变量
+        run: |
+          echo "WEBHOOK_UIKIT: ${{ secrets.WEBHOOK_UIKIT }}"
