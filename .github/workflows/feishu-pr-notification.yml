@@ -1,42 +1,6 @@
 name: PR Notification to Feishu
 
 on:
-  branch_protection_rule:
-    types: [created, deleted]
-  check_run:
-    types: [rerequested, completed]
-  check_suite:
-    types: [completed]
-  create:
-  delete:
-  deployment_status:
-  discussion:
-    types: [created, edited, answered]
-  discussion_comment:
-    types: [created, deleted]
-  fork:
-  gollum:
-  issues:
-    types: [opened, edited, milestoned, pinned, reopened]
-  issue_comment:
-    types: [created, deleted]
-  label:
-    types: [created, deleted]
-  merge_group:
-    types: [checks_requested]
-  milestone:
-    types: [opened, deleted]
-  page_build:
-  project:
-    types: [created, deleted, reopened]
-  project_card:
-    types: [created, deleted]
-  project_column:
-    types: [created, deleted]
-  public:
-  pull_request:
-    branches: ["main"]
-    types: [opened, reopened]
   pull_request_review:
     types: [edited, dismissed, submitted]
   pull_request_review_comment:
@@ -44,14 +8,7 @@ on:
   pull_request_target:
     types: [assigned, opened, synchronize, reopened]
   push:
-    branch: ["main"]
-  registry_package:
-    types: [published]
-  release:
-    types: [published]
-  status:
-  watch:
-    types: [started]
+    branches: ["main"]
 
 jobs:
   notify:
@@ -240,15 +197,15 @@ jobs:
             
             echo "准备发送通知到 ${team} 团队..."
             
-            # 生成时间戳
-            timestamp=$(date +%s)
+            # 生成时间戳（毫秒级）
+            timestamp=$(( $(date +%s%N) / 1000000 ))
             echo "时间戳: ${timestamp}"
             
-            # 生成签名字符串
+            # 生成签名字符串 (timestamp + key)
             string_to_sign="${timestamp}\n${api_key}"
             
-            # 使用 API_KEY 生成签名
-            sign=$(echo -n "$string_to_sign" | openssl base64 -A | openssl dgst -sha256 -hmac "$api_key" -binary | openssl base64 -A)
+            # 使用 API_KEY 生成签名 (需要先对签名字符串进行 base64 编码)
+            sign=$(echo -ne "$string_to_sign" | openssl dgst -sha256 -hmac "$api_key" -binary | openssl base64 -A)
             echo "签名已生成"
             
             # 发送请求
