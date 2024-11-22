@@ -80,7 +80,9 @@ jobs:
           echo "PR链接: ${PR_URL}"
           echo "PR创建者: ${GITHUB_USER}"
           
-          FEISHU_USER_VAR="FEISHU_${GITHUB_USER}"
+          # 将 GitHub 用户名中的特殊字符替换为下划线
+          SAFE_GITHUB_USER=$(echo "${GITHUB_USER}" | tr '-' '_')
+          FEISHU_USER_VAR="FEISHU_${SAFE_GITHUB_USER}"
           FEISHU_USER_ID="${!FEISHU_USER_VAR}"
           
           # 根据是否有飞书用户ID来决定是否使用at标记
@@ -106,7 +108,8 @@ jobs:
             fi
           elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
             REVIEWER="${{ github.event.review.user.login }}"
-            REVIEWER_VAR="FEISHU_${REVIEWER}"
+            SAFE_REVIEWER=$(echo "${REVIEWER}" | tr '-' '_')
+            REVIEWER_VAR="FEISHU_${SAFE_REVIEWER}"
             REVIEWER_ID="${!REVIEWER_VAR}"
             
             if [[ -n "${REVIEWER_ID}" ]]; then
@@ -125,7 +128,8 @@ jobs:
             EXTRA_CONTENT="\n${REVIEWER_TEXT}\n**评审意见**: ${REVIEW_BODY}"
           elif [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
             COMMENTER="${{ github.event.comment.user.login }}"
-            COMMENTER_VAR="FEISHU_${COMMENTER}"
+            SAFE_COMMENTER=$(echo "${COMMENTER}" | tr '-' '_')
+            COMMENTER_VAR="FEISHU_${SAFE_COMMENTER}"
             COMMENTER_ID="${!COMMENTER_VAR}"
             
             if [[ -n "${COMMENTER_ID}" ]]; then
