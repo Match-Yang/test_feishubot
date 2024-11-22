@@ -1,14 +1,19 @@
 name: PR Notification to Feishu
 
 on:
-  pull_request_review:
-    types: [edited, dismissed, submitted]
-  pull_request_review_comment:
-    types: [created, edited, deleted]
   pull_request_target:
-    types: [assigned, opened, synchronize, reopened, closed]
-  push:
-    branches: ["main"]
+    types: 
+      - assigned
+      - opened
+      - synchronize
+      - reopened
+      - closed
+      - review_requested
+      - converted_to_draft
+      - ready_for_review
+      - review_request_removed
+  issue_comment:
+    types: [created, edited, deleted]
 
 jobs:
   notify:
@@ -59,6 +64,8 @@ jobs:
           REVIEW_BODY: ${{ github.event.review.body }}
           REVIEW_STATE: ${{ github.event.review.state }}
           COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          IS_PR_COMMENT: ${{ github.event.issue.pull_request != '' }}
           EVENT_TYPE: ${{ github.event_name }}
         run: |
           echo "开始处理PR通知..."
@@ -126,7 +133,7 @@ jobs:
               STATUS="💬 收到评审意见"
             fi
             EXTRA_CONTENT="\n${REVIEWER_TEXT}\n**评审意见**: ${REVIEW_BODY}"
-          elif [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
+          elif [[ "${{ github.event_name }}" == "issue_comment" && "$IS_PR_COMMENT" == "true" ]]; then
             COMMENTER="${{ github.event.comment.user.login }}"
             SAFE_COMMENTER=$(echo "${COMMENTER}" | tr '-' '_')
             COMMENTER_VAR="FEISHU_${SAFE_COMMENTER}"
@@ -138,8 +145,12 @@ jobs:
               COMMENTER_TEXT="**评论者**: ${COMMENTER}"
             fi
             
-            STATUS="💬 收到评论"
+            STATUS="💬 PR评论"
             EXTRA_CONTENT="\n${COMMENTER_TEXT}\n**评论内容**: ${COMMENT_BODY}"
+            
+            # 对于 issue_comment 事件，需要特别处理 PR URL
+            PR_URL="${{ github.event.issue.pull_request.html_url }}"
+            PR_TITLE="${{ github.event.issue.title }}"
           elif [[ "${{ github.event_name }}" == "push" ]]; then
             STATUS="🔨 推送到主分支"
             EXTRA_CONTENT="\n**分支**: main"
@@ -198,7 +209,7 @@ jobs:
           )
           
           # 只在有 PR 相关事件时获取变更文件列表
-          if [[ "${{ github.event_name }}" == "pull_request_target" || "${{ github.event_name }}" == "pull_request_review" || "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
+          if [[ "${{ github.event_name }}" == "pull_request_target" || "${{ github.event_name }}" == "pull_request_review" || "${{ github.event_name }}" == "issue_comment" ]]; then
             echo "获取变更文件列表..."
             changed_files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename')
             echo "变更文件列表:"
