@@ -78,10 +78,20 @@ jobs:
           echo "事件动作: ${{ github.event.action }}"
           
           # 获取PR信息
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          PR_URL="${{ github.event.pull_request.html_url }}"
-          PR_BODY="${{ github.event.pull_request.body }}"
-          GITHUB_USER="${{ github.event.pull_request.user.login }}"
+          if [[ "${{ github.event_name }}" == "issue_comment" && "$IS_PR_COMMENT" == "true" ]]; then
+            # 从 issue_comment 事件中获取 PR 号码
+            PR_NUMBER=$(echo "${{ github.event.issue.pull_request.url }}" | awk -F'/' '{print $NF}')
+            # 使用 PR 号码获取详细信息
+            PR_INFO=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}")
+            PR_TITLE="${{ github.event.issue.title }}"
+            PR_URL="${{ github.event.issue.pull_request.html_url }}"
+            GITHUB_USER=$(echo "$PR_INFO" | jq -r '.user.login')
+          else
+            PR_TITLE="${{ github.event.pull_request.title }}"
+            PR_URL="${{ github.event.pull_request.html_url }}"
+            PR_BODY="${{ github.event.pull_request.body }}"
+            GITHUB_USER="${{ github.event.pull_request.user.login }}"
+          fi
           
           echo "PR标题: ${PR_TITLE}"
           echo "PR链接: ${PR_URL}"
@@ -208,10 +218,17 @@ jobs:
           EOF
           )
           
-          # 只在有 PR 相关事件时获取变更文件列表
-          if [[ "${{ github.event_name }}" == "pull_request_target" || "${{ github.event_name }}" == "pull_request_review" || "${{ github.event_name }}" == "issue_comment" ]]; then
+          # 修改获取变更文件列表的逻辑
+          if [[ "${{ github.event_name }}" == "pull_request_target" || "${{ github.event_name }}" == "pull_request_review" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          elif [[ "${{ github.event_name }}" == "issue_comment" && "$IS_PR_COMMENT" == "true" ]]; then
+            # 从 issue_comment 事件中获取 PR 号码
+            PR_NUMBER=$(echo "${{ github.event.issue.pull_request.url }}" | awk -F'/' '{print $NF}')
+          fi
+          
+          if [[ -n "$PR_NUMBER" ]]; then
             echo "获取变更文件列表..."
-            changed_files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename')
+            changed_files=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/files" --jq '.[].filename')
             echo "变更文件列表:"
             echo "$changed_files"
             
@@ -226,10 +243,6 @@ jobs:
                 notify_zim=true
               fi
             done <<< "$changed_files"
-          else
-            # 对于 push 事件，默认通知所有团队
-            notify_uikit=true
-            notify_zim=true
           fi
           
           send_notification() {
