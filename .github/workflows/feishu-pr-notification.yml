@@ -6,9 +6,21 @@ permissions:
 
 on:
   pull_request_target:
-    types: [opened, synchronize, closed]
+    types: [assigned, opened, synchronize, reopened, closed]
     branches:
       - main
+    paths:
+      - 'uikit/**'
+      - 'core_products/zim/**'
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+    branches:
+      - main
+    paths:
+      - 'uikit/**'
+      - 'core_products/zim/**'
+  issue_comment:
+    types: [created, edited, deleted]
     paths:
       - 'uikit/**'
       - 'core_products/zim/**'
@@ -16,10 +28,9 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    if: ${{ !github.event.pull_request.head.repo.fork }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Check secrets
         run: |
@@ -60,6 +71,9 @@ jobs:
           PR_CREATOR: ${{ github.event.pull_request.user.login }}
           PR_ACTION: ${{ github.event.action }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+          EVENT_TYPE: ${{ github.event_name }}
         run: |
           echo "开始处理PR通知..."
           echo "环境变量检查:"
@@ -84,21 +98,51 @@ jobs:
           FEISHU_USER_ID="${!FEISHU_USER_VAR:-$GITHUB_USER}"
           echo "对应的飞书用户ID: ${FEISHU_USER_ID}"
           
-          if [[ "${{ github.event.action }}" == "opened" ]]; then
-            STATUS="新建PR"
-          elif [[ "${{ github.event.action }}" == "synchronize" ]]; then
-            STATUS="更新PR"
-          elif [[ "${{ github.event.action }}" == "closed" ]]; then
-            if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
-              STATUS="合并PR"
-            else
-              STATUS="关闭PR"
+          # 根据不同事件类型设置状态
+          if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
+            if [[ "${{ github.event.action }}" == "opened" ]]; then
+              STATUS="新建PR"
+            elif [[ "${{ github.event.action }}" == "synchronize" ]]; then
+              STATUS="更新PR"
+            elif [[ "${{ github.event.action }}" == "closed" ]]; then
+              if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
+                STATUS="合并PR"
+              else
+                STATUS="关闭PR"
+              fi
+            fi
+          elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
+            if [[ "${{ github.event.review.state }}" == "approved" ]]; then
+              STATUS="审核通过"
+            elif [[ "${{ github.event.review.state }}" == "changes_requested" ]]; then
+              STATUS="需要修改"
+            elif [[ "${{ github.event.review.state }}" == "commented" ]]; then
+              STATUS="审核评论"
+            fi
+          elif [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            if [[ "${{ github.event.action }}" == "created" ]]; then
+              STATUS="新增评论"
+            elif [[ "${{ github.event.action }}" == "edited" ]]; then
+              STATUS="编辑评论"
+            elif [[ "${{ github.event.action }}" == "deleted" ]]; then
+              STATUS="删除评论"
             fi
           fi
-          echo "PR状态: ${STATUS}"
           
-          # 构建消息卡片
-          echo "构建消息卡片..."
+          # 构建消息内容
+          CONTENT="**状态**: ${STATUS}\n**创建者**: <at id=${FEISHU_USER_ID}></at>"
+          
+          # 添加评论内容（如果有）
+          if [[ -n "$COMMENT_BODY" ]]; then
+            CONTENT="${CONTENT}\n**评论内容**: ${COMMENT_BODY}"
+          fi
+          
+          # 添加PR描述（如果有）
+          if [[ -n "$PR_BODY" ]]; then
+            CONTENT="${CONTENT}\n**描述**: ${PR_BODY}"
+          fi
+          
+          # 更新消息卡片中的内容
           MESSAGE_CARD=$(cat << EOF
           {
             "msg_type": "interactive",
@@ -118,7 +162,7 @@ jobs:
                   "tag": "div",
                   "text": {
                     "tag": "lark_md",
-                    "content": "**状态**: ${STATUS}\n**创建者**: <at id=${FEISHU_USER_ID}></at>\n**描述**: ${PR_BODY:-无}"
+                    "content": "${CONTENT}"
                   }
                 },
                 {
