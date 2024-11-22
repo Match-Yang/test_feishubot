@@ -125,20 +125,24 @@ jobs:
           {
             "msg_type": "interactive",
             "card": {
+              "config": {
+                "wide_screen_mode": true
+              },
               "header": {
                 "title": {
                   "tag": "plain_text",
                   "content": "${PR_TITLE}"
                 },
-                "template": "${PR_MERGED:-false}" == "true" ? "green" : "blue"
+                "template": "blue"
               },
               "elements": [
                 {
                   "tag": "markdown",
-                  "text": {
-                    "tag": "lark_md",
-                    "content": "${CONTENT}"
-                  }
+                  "content": "${CONTENT}",
+                  "text_align": "left"
+                },
+                {
+                  "tag": "hr"
                 },
                 {
                   "tag": "action",
@@ -150,7 +154,7 @@ jobs:
                         "content": "查看 PR"
                       },
                       "url": "${PR_URL}",
-                      "type": "default"
+                      "type": "primary"
                     }
                   ]
                 }
