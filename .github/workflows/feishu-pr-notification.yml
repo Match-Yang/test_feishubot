@@ -95,6 +95,8 @@ jobs:
               else
                 STATUS="❌ PR 已关闭"
               fi
+            else
+              STATUS="🔄 PR 更新"
             fi
           elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
             REVIEWER="${{ github.event.review.user.login }}"
@@ -115,6 +117,12 @@ jobs:
             COMMENTER_ID="${!COMMENTER_VAR:-$COMMENTER}"
             STATUS="💬 收到评论"
             EXTRA_CONTENT="\n**评论者**: <at id=${COMMENTER_ID}></at>\n**评论内容**: ${COMMENT_BODY}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            STATUS="🔨 推送到主分支"
+            EXTRA_CONTENT="\n**分支**: main"
+          else
+            STATUS="⚡ PR 活动"
+            EXTRA_CONTENT=""
           fi
           
           # 构建消息内容
@@ -166,25 +174,29 @@ jobs:
           EOF
           )
           
-          echo "获取变更文件列表..."
-          changed_files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename')
-          echo "变更文件列表:"
-          echo "$changed_files"
-          
-          notify_uikit=false
-          notify_zim=false
-          
-          echo "检查文件变更范围..."
-          while IFS= read -r file; do
-            echo "检查文件: $file"
-            if [[ $file == uikit/* ]]; then
-              echo "发现 UIKit 相关变更"
-              notify_uikit=true
-            elif [[ $file == core_products/zim/* ]]; then
-              echo "发现 ZIM 相关变更"
-              notify_zim=true
-            fi
-          done <<< "$changed_files"
+          # 只在有 PR 相关事件时获取变更文件列表
+          if [[ "${{ github.event_name }}" == "pull_request_target" || "${{ github.event_name }}" == "pull_request_review" || "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
+            echo "获取变更文件列表..."
+            changed_files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename')
+            echo "变更文件列表:"
+            echo "$changed_files"
+            
+            echo "检查文件变更范围..."
+            while IFS= read -r file; do
+              echo "检查文件: $file"
+              if [[ $file == uikit/* ]]; then
+                echo "发现 UIKit 相关变更"
+                notify_uikit=true
+              elif [[ $file == core_products/zim/* ]]; then
+                echo "发现 ZIM 相关变更"
+                notify_zim=true
+              fi
+            done <<< "$changed_files"
+          else
+            # 对于 push 事件，默认通知所有团队
+            notify_uikit=true
+            notify_zim=true
+          fi
           
           send_notification() {
             local webhook_url="$1"
