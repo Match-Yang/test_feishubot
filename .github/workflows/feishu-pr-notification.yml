@@ -6,7 +6,7 @@ on:
   pull_request_review_comment:
     types: [created, edited, deleted]
   pull_request_target:
-    types: [assigned, opened, synchronize, reopened]
+    types: [assigned, opened, synchronize, reopened, closed]
   push:
     branches: ["main"]
 
@@ -56,8 +56,9 @@ jobs:
           PR_CREATOR: ${{ github.event.pull_request.user.login }}
           PR_ACTION: ${{ github.event.action }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
+          REVIEW_BODY: ${{ github.event.review.body }}
           REVIEW_STATE: ${{ github.event.review.state }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
           EVENT_TYPE: ${{ github.event_name }}
         run: |
           echo "开始处理PR通知..."
@@ -83,49 +84,41 @@ jobs:
           FEISHU_USER_ID="${!FEISHU_USER_VAR:-$GITHUB_USER}"
           echo "对应的飞书用户ID: ${FEISHU_USER_ID}"
           
-          # 根据不同事件类型设置状态
+          # 根据不同事件类型设置状态和内容
           if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
             if [[ "${{ github.event.action }}" == "opened" ]]; then
-              STATUS="新建PR"
-            elif [[ "${{ github.event.action }}" == "synchronize" ]]; then
-              STATUS="更新PR"
+              STATUS="🆕 新建 PR"
+              EXTRA_CONTENT="\n**描述**: ${PR_BODY}"
             elif [[ "${{ github.event.action }}" == "closed" ]]; then
               if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
-                STATUS="合并PR"
+                STATUS="✅ PR 已合并"
               else
-                STATUS="关闭PR"
+                STATUS="❌ PR 已关闭"
               fi
             fi
           elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
+            REVIEWER="${{ github.event.review.user.login }}"
+            REVIEWER_VAR="FEISHU_${REVIEWER}"
+            REVIEWER_ID="${!REVIEWER_VAR:-$REVIEWER}"
+            
             if [[ "${{ github.event.review.state }}" == "approved" ]]; then
-              STATUS="审核通过"
+              STATUS="👍 审核通过"
             elif [[ "${{ github.event.review.state }}" == "changes_requested" ]]; then
-              STATUS="需要修改"
+              STATUS="📝 需要修改"
             elif [[ "${{ github.event.review.state }}" == "commented" ]]; then
-              STATUS="审核评论"
+              STATUS="💬 收到评审意见"
             fi
-          elif [[ "${{ github.event_name }}" == "issue_comment" ]]; then
-            if [[ "${{ github.event.action }}" == "created" ]]; then
-              STATUS="新增评论"
-            elif [[ "${{ github.event.action }}" == "edited" ]]; then
-              STATUS="编辑评论"
-            elif [[ "${{ github.event.action }}" == "deleted" ]]; then
-              STATUS="删除评论"
-            fi
+            EXTRA_CONTENT="\n**评审者**: <at id=${REVIEWER_ID}></at>\n**评审意见**: ${REVIEW_BODY}"
+          elif [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
+            COMMENTER="${{ github.event.comment.user.login }}"
+            COMMENTER_VAR="FEISHU_${COMMENTER}"
+            COMMENTER_ID="${!COMMENTER_VAR:-$COMMENTER}"
+            STATUS="💬 收到评论"
+            EXTRA_CONTENT="\n**评论者**: <at id=${COMMENTER_ID}></at>\n**评论内容**: ${COMMENT_BODY}"
           fi
           
           # 构建消息内容
-          CONTENT="**状态**: ${STATUS}\n**创建者**: <at id=${FEISHU_USER_ID}></at>"
-          
-          # 添加评论内容（如果有）
-          if [[ -n "$COMMENT_BODY" ]]; then
-            CONTENT="${CONTENT}\n**评论内容**: ${COMMENT_BODY}"
-          fi
-          
-          # 添加PR描述（如果有）
-          if [[ -n "$PR_BODY" ]]; then
-            CONTENT="${CONTENT}\n**描述**: ${PR_BODY}"
-          fi
+          CONTENT="**状态**: ${STATUS}\n**创建者**: <at id=${FEISHU_USER_ID}></at>${EXTRA_CONTENT}"
           
           # 更新消息卡片中的内容
           MESSAGE_CARD=$(cat << EOF
@@ -140,7 +133,7 @@ jobs:
                   "tag": "plain_text",
                   "content": "${PR_TITLE}"
                 },
-                "template": "blue"
+                "template": "${PR_MERGED:-false}" == "true" ? "green" : "blue"
               },
               "elements": [
                 {
@@ -197,23 +190,10 @@ jobs:
             
             echo "准备发送通知到 ${team} 团队..."
             
-            # 生成秒级时间戳
-            timestamp=$(date +%s)
-            echo "时间戳: ${timestamp}"
-            
-            # 生成签名字符串 (timestamp + "\n" + secret)
-            string_to_sign="${timestamp}\n${api_key}"
-            
-            # 使用 HMAC-SHA256 对空字符串进行签名，然后 Base64 编码
-            sign=$(echo -n "" | openssl dgst -sha256 -hmac "$string_to_sign" -binary | openssl base64 -A)
-            echo "签名已生成"
-            
-            # 发送请求
+            # 直接发送请求，不进行签名验证
             echo "发送请求到飞书机器人..."
             response=$(curl -X POST \
                  -H "Content-Type: application/json" \
-                 -H "X-Lark-Request-Timestamp: ${timestamp}" \
-                 -H "X-Lark-Sign: ${sign}" \
                  -d "$MESSAGE_CARD" \
                  "$webhook_url")
             echo "飞书响应: $response"
