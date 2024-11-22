@@ -197,15 +197,15 @@ jobs:
             
             echo "准备发送通知到 ${team} 团队..."
             
-            # 生成时间戳（毫秒级）
-            timestamp=$(( $(date +%s%N) / 1000000 ))
+            # 生成秒级时间戳
+            timestamp=$(date +%s)
             echo "时间戳: ${timestamp}"
             
-            # 生成签名字符串 (timestamp + key)
+            # 生成签名字符串 (timestamp + "\n" + secret)
             string_to_sign="${timestamp}\n${api_key}"
             
-            # 使用 API_KEY 生成签名 (需要先对签名字符串进行 base64 编码)
-            sign=$(echo -ne "$string_to_sign" | openssl dgst -sha256 -hmac "$api_key" -binary | openssl base64 -A)
+            # 使用 HMAC-SHA256 对空字符串进行签名，然后 Base64 编码
+            sign=$(echo -n "" | openssl dgst -sha256 -hmac "$string_to_sign" -binary | openssl base64 -A)
             echo "签名已生成"
             
             # 发送请求
