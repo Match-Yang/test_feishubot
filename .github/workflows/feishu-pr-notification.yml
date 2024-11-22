@@ -5,7 +5,7 @@ permissions:
   pull-requests: write
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, closed]
     branches:
       - main
@@ -16,7 +16,7 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.full_name != github.repository
+    if: ${{ !github.event.pull_request.head.repo.fork }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -28,6 +28,7 @@ jobs:
           echo "API_KEY_UIKIT: ${{ secrets.API_KEY_UIKIT != '' }}"
           echo "WEBHOOK_ZIM: ${{ secrets.WEBHOOK_ZIM != '' }}"
           echo "API_KEY_ZIM: ${{ secrets.API_KEY_ZIM != '' }}"
+          echo "测试 Variables: ${{ vars.TEST_WEBHOOK }}"
 
       - name: Load user mapping
         id: mapping
