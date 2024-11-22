@@ -125,9 +125,6 @@ jobs:
           {
             "msg_type": "interactive",
             "card": {
-              "config": {
-                "wide_screen_mode": true
-              },
               "header": {
                 "title": {
                   "tag": "plain_text",
@@ -137,7 +134,7 @@ jobs:
               },
               "elements": [
                 {
-                  "tag": "div",
+                  "tag": "markdown",
                   "text": {
                     "tag": "lark_md",
                     "content": "${CONTENT}"
