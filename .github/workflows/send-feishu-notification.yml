@@ -66,14 +66,20 @@ jobs:
           fi
 
       - name: Load user mapping
+        id: mapping
         run: |
+          echo "开始加载用户映射..."
           if [ -f .github/configs/user_mapping.yml ]; then
+            cat .github/configs/user_mapping.yml
             while IFS=: read -r github_user feishu_id || [ -n "$github_user" ]; do
               [[ $github_user =~ ^#.*$ || -z $github_user ]] && continue
               github_user=$(echo $github_user | tr -d ' "')
               feishu_id=$(echo $feishu_id | tr -d ' "')
+              echo "映射: GitHub用户 ${github_user} -> 飞书用户 ${feishu_id}"
               echo "FEISHU_${github_user}=${feishu_id}" >> $GITHUB_ENV
             done < .github/configs/user_mapping.yml
+          else
+            echo "警告: 用户映射文件不存在"
           fi
 
       - name: Check notification targets
@@ -147,6 +153,7 @@ jobs:
               fi
             elif [[ "$EVENT_TYPE" == "pull_request_review" ]]; then
               REVIEWER_ID=$(get_feishu_id "$REVIEWER")
+              echo "REVIEWER_ID: ${REVIEWER_ID}"
               if [[ -n "${REVIEWER_ID}" ]]; then
                 REVIEWER_TEXT="**评审者**: <at id=${REVIEWER_ID}></at>"
               else
