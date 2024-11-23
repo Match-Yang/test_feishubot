@@ -79,28 +79,48 @@ jobs:
       - name: Check notification targets
         id: check_targets
         run: |
-          notify_uikit=false
-          notify_zim=false
+          # 初始化一个关联数组来存储通知标记
+          declare -A notify_targets
           
-          if [ -f changed_files.txt ]; then
-            while IFS= read -r file; do
-              if [[ $file == uikit/* ]]; then
-                notify_uikit=true
-              elif [[ $file == core_products/zim/* ]]; then
-                notify_zim=true
-              fi
-            done < changed_files.txt
+          if [ -f .github/configs/notification_targets.yml ]; then
+            # 读取配置文件，跳过注释和空行
+            while IFS=: read -r path webhook || [ -n "$path" ]; do
+              [[ $path =~ ^[[:space:]]*# ]] && continue  # 跳过注释
+              [[ -z "${path// }" ]] && continue  # 跳过空行
+              
+              # 清理输入
+              path=$(echo "$path" | tr -d ' "')
+              webhook=$(echo "$webhook" | tr -d ' "')
+              
+              # 跳过非目标配置行
+              [[ "$path" == "targets" ]] && continue
+              
+              echo "检查目录: $path -> $webhook"
+              notify_targets["$path"]="$webhook"
+            done < .github/configs/notification_targets.yml
           fi
           
-          echo "notify_uikit=${notify_uikit}" >> $GITHUB_ENV
-          echo "notify_zim=${notify_zim}" >> $GITHUB_ENV
+          # 检查变更文件
+          if [ -f changed_files.txt ]; then
+            while IFS= read -r file; do
+              for path in "${!notify_targets[@]}"; do
+                if [[ $file == $path* ]]; then
+                  webhook_var="${notify_targets[$path]}"
+                  echo "notify_${webhook_var,,}=true" >> $GITHUB_ENV
+                  echo "发现 ${path} 相关变更，将通知 ${webhook_var}"
+                fi
+              done
+            done < changed_files.txt
+          fi
 
       - name: Send notifications
         env:
           WEBHOOK_UIKIT: ${{ secrets.WEBHOOK_UIKIT }}
-          API_KEY_UIKIT: ${{ secrets.API_KEY_UIKIT }}
           WEBHOOK_ZIM: ${{ secrets.WEBHOOK_ZIM }}
-          API_KEY_ZIM: ${{ secrets.API_KEY_ZIM }}
+          # 在这里添加新的 webhook 环境变量
+          # WEBHOOK_DOCS: ${{ secrets.WEBHOOK_DOCS }}
+          # WEBHOOK_FE: ${{ secrets.WEBHOOK_FE }}
+          # WEBHOOK_BE: ${{ secrets.WEBHOOK_BE }}
         run: |
           # 获取用户的飞书ID
           get_feishu_id() {
@@ -224,10 +244,10 @@ jobs:
           set_status_and_content
           
           # 发送通知
-          if [[ $notify_uikit == true && -n $WEBHOOK_UIKIT ]]; then
-            send_notification "$WEBHOOK_UIKIT" "UIKit"
-          fi
-          
-          if [[ $notify_zim == true && -n $WEBHOOK_ZIM ]]; then
-            send_notification "$WEBHOOK_ZIM" "ZIM"
-          fi
+          for webhook_var in $(env | grep '^WEBHOOK_' | cut -d= -f1); do
+            notify_flag="notify_${webhook_var,,}"  # 转换为小写
+            if [[ "${!notify_flag}" == "true" && -n "${!webhook_var}" ]]; then
+              team="${webhook_var#WEBHOOK_}"  # 移除 WEBHOOK_ 前缀
+              send_notification "${!webhook_var}" "$team"
+            fi
+          done
