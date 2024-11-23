@@ -1,4 +1,4 @@
-name: PR Notification to Feishu
+name: prepare_pr_info
 
 on:
   pull_request_target:
@@ -18,267 +18,57 @@ on:
     types: [created, edited, deleted]
 
 jobs:
-  notify:
+  prepare:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check secrets
+      - name: Prepare PR info
+        id: pr_info
         run: |
-          echo "检查 secrets 配置..."
-          echo "WEBHOOK_UIKIT: ${{ secrets.WEBHOOK_UIKIT != '' }}"
-          echo "API_KEY_UIKIT: ${{ secrets.API_KEY_UIKIT != '' }}"
-          echo "WEBHOOK_ZIM: ${{ secrets.WEBHOOK_ZIM != '' }}"
-          echo "API_KEY_ZIM: ${{ secrets.API_KEY_ZIM != '' }}"
-          echo "测试 Variables: ${{ vars.TEST_WEBHOOK }}"
-
-      - name: Load user mapping
-        id: mapping
-        run: |
-          echo "开始加载用户映射..."
-          if [ -f .github/configs/user_mapping.yml ]; then
-            cat .github/configs/user_mapping.yml
-            while IFS=: read -r github_user feishu_id || [ -n "$github_user" ]; do
-              [[ $github_user =~ ^#.*$ || -z $github_user ]] && continue
-              github_user=$(echo $github_user | tr -d ' "')
-              feishu_id=$(echo $feishu_id | tr -d ' "')
-              echo "映射: GitHub用户 ${github_user} -> 飞书用户 ${feishu_id}"
-              echo "FEISHU_${github_user}=${feishu_id}" >> $GITHUB_ENV
-            done < .github/configs/user_mapping.yml
-          else
-            echo "警告: 用户映射文件不存在"
-          fi
-
-      - name: Send notification
-        env:
-          WEBHOOK_UIKIT: ${{ secrets.WEBHOOK_UIKIT }}
-          API_KEY_UIKIT: ${{ secrets.API_KEY_UIKIT }}
-          WEBHOOK_ZIM: ${{ secrets.WEBHOOK_ZIM }}
-          API_KEY_ZIM: ${{ secrets.API_KEY_ZIM }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_CREATOR: ${{ github.event.pull_request.user.login }}
-          PR_ACTION: ${{ github.event.action }}
-          PR_MERGED: ${{ github.event.pull_request.merged }}
-          REVIEW_BODY: ${{ github.event.review.body }}
-          REVIEW_STATE: ${{ github.event.review.state }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
-          COMMENT_USER: ${{ github.event.comment.user.login }}
-          IS_PR_COMMENT: ${{ github.event.issue.pull_request != '' }}
-          EVENT_TYPE: ${{ github.event_name }}
-        run: |
-          echo "开始处理PR通知..."
-          echo "环境变量检查:"
-          echo "WEBHOOK_UIKIT 是否设置: ${WEBHOOK_UIKIT:+true}"
-          echo "API_KEY_UIKIT 是否设置: ${API_KEY_UIKIT:+true}"
+          # 准备基础信息
+          echo "event_type=${{ github.event_name }}" >> pr_info.txt
+          echo "action=${{ github.event.action }}" >> pr_info.txt
           
-          # 打印事件信息
-          echo "事件类型: ${{ github.event_name }}"
-          echo "事件动作: ${{ github.event.action }}"
-          
-          # 获取PR信息
-          if [[ "${{ github.event_name }}" == "issue_comment" && "$IS_PR_COMMENT" == "true" ]]; then
-            # 从 issue_comment 事件中获取 PR 号码
+          # 根据不同事件类型获取PR信息
+          if [[ "${{ github.event_name }}" == "issue_comment" && "${{ github.event.issue.pull_request != '' }}" == "true" ]]; then
             PR_NUMBER=$(echo "${{ github.event.issue.pull_request.url }}" | awk -F'/' '{print $NF}')
-            # 使用 PR 号码获取详细信息
             PR_INFO=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}")
-            PR_TITLE="${{ github.event.issue.title }}"
-            PR_URL="${{ github.event.issue.pull_request.html_url }}"
-            GITHUB_USER=$(echo "$PR_INFO" | jq -r '.user.login')
+            echo "pr_title=${{ github.event.issue.title }}" >> pr_info.txt
+            echo "pr_url=${{ github.event.issue.pull_request.html_url }}" >> pr_info.txt
+            echo "comment_body=${{ github.event.comment.body }}" >> pr_info.txt
+            echo "comment_user=${{ github.event.comment.user.login }}" >> pr_info.txt
           else
-            PR_TITLE="${{ github.event.pull_request.title }}"
-            PR_URL="${{ github.event.pull_request.html_url }}"
-            PR_BODY="${{ github.event.pull_request.body }}"
-            GITHUB_USER="${{ github.event.pull_request.user.login }}"
+            echo "pr_title=${{ github.event.pull_request.title }}" >> pr_info.txt
+            echo "pr_url=${{ github.event.pull_request.html_url }}" >> pr_info.txt
+            echo "pr_body=${{ github.event.pull_request.body }}" >> pr_info.txt
+            echo "pr_creator=${{ github.event.pull_request.user.login }}" >> pr_info.txt
+            echo "pr_merged=${{ github.event.pull_request.merged }}" >> pr_info.txt
           fi
           
-          echo "PR标题: ${PR_TITLE}"
-          echo "PR链接: ${PR_URL}"
-          echo "PR创建者: ${GITHUB_USER}"
-          
-          # 将 GitHub 用户名中的特殊字符替换为下划线
-          SAFE_GITHUB_USER=$(echo "${GITHUB_USER}" | tr '-' '_')
-          FEISHU_USER_VAR="FEISHU_${SAFE_GITHUB_USER}"
-          FEISHU_USER_ID="${!FEISHU_USER_VAR}"
-          
-          # 根据是否有飞书用户ID来决定是否使用at标记
-          if [[ -n "${FEISHU_USER_ID}" ]]; then
-            CREATOR_TEXT="**创建者**: <at id=${FEISHU_USER_ID}></at>"
-          else
-            CREATOR_TEXT="**创建者**: ${GITHUB_USER}"
+          # 如果是review事件,添加review信息
+          if [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
+            echo "review_body=${{ github.event.review.body }}" >> pr_info.txt
+            echo "review_state=${{ github.event.review.state }}" >> pr_info.txt
+            echo "reviewer=${{ github.event.review.user.login }}" >> pr_info.txt
           fi
-          
-          # 根据不同事件类型设置状态和内容
-          if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
-            if [[ "${{ github.event.action }}" == "opened" ]]; then
-              STATUS="🆕 新建 PR"
-              EXTRA_CONTENT="\n**描述**: ${PR_BODY}"
-            elif [[ "${{ github.event.action }}" == "closed" ]]; then
-              if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
-                STATUS="✅ PR 已合并"
-              else
-                STATUS="❌ PR 已关闭"
-              fi
-            else
-              STATUS="🔄 PR 更新"
-            fi
-          elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
-            REVIEWER="${{ github.event.review.user.login }}"
-            SAFE_REVIEWER=$(echo "${REVIEWER}" | tr '-' '_')
-            REVIEWER_VAR="FEISHU_${SAFE_REVIEWER}"
-            REVIEWER_ID="${!REVIEWER_VAR}"
-            
-            if [[ -n "${REVIEWER_ID}" ]]; then
-              REVIEWER_TEXT="**评审者**: <at id=${REVIEWER_ID}></at>"
-            else
-              REVIEWER_TEXT="**评审者**: ${REVIEWER}"
-            fi
-            
-            if [[ "${{ github.event.review.state }}" == "approved" ]]; then
-              STATUS="👍 审核通过"
-            elif [[ "${{ github.event.review.state }}" == "changes_requested" ]]; then
-              STATUS="📝 需要修改"
-            elif [[ "${{ github.event.review.state }}" == "commented" ]]; then
-              STATUS="💬 收到评审意见"
-            fi
-            EXTRA_CONTENT="\n${REVIEWER_TEXT}\n**评审意见**: ${REVIEW_BODY}"
-          elif [[ "${{ github.event_name }}" == "issue_comment" && "$IS_PR_COMMENT" == "true" ]]; then
-            COMMENTER="${{ github.event.comment.user.login }}"
-            SAFE_COMMENTER=$(echo "${COMMENTER}" | tr '-' '_')
-            COMMENTER_VAR="FEISHU_${SAFE_COMMENTER}"
-            COMMENTER_ID="${!COMMENTER_VAR}"
-            
-            if [[ -n "${COMMENTER_ID}" ]]; then
-              COMMENTER_TEXT="**评论者**: <at id=${COMMENTER_ID}></at>"
-            else
-              COMMENTER_TEXT="**评论者**: ${COMMENTER}"
-            fi
-            
-            STATUS="💬 PR评论"
-            EXTRA_CONTENT="\n${COMMENTER_TEXT}\n**评论内容**: ${COMMENT_BODY}"
-            
-            # 对于 issue_comment 事件，需要特别处理 PR URL
-            PR_URL="${{ github.event.issue.pull_request.html_url }}"
-            PR_TITLE="${{ github.event.issue.title }}"
-          elif [[ "${{ github.event_name }}" == "push" ]]; then
-            STATUS="🔨 推送到主分支"
-            EXTRA_CONTENT="\n**分支**: main"
-          else
-            STATUS="⚡ PR 活动"
-            EXTRA_CONTENT=""
-          fi
-          
-          # 构建消息内容
-          CONTENT="**状态**: ${STATUS}\n${CREATOR_TEXT}${EXTRA_CONTENT}"
-          
-          # 更新消息卡片中的内容
-          MESSAGE_CARD=$(cat << EOF
-          {
-            "msg_type": "interactive",
-            "card": {
-              "config": {
-                "wide_screen_mode": true
-              },
-              "header": {
-                "title": {
-                  "tag": "plain_text",
-                  "content": "${PR_TITLE}"
-                },
-                "template": "blue"
-              },
-              "elements": [
-                {
-                  "tag": "div",
-                  "text": {
-                    "tag": "lark_md",
-                    "content": "**状态**: ${STATUS}\n${CREATOR_TEXT}${EXTRA_CONTENT}"
-                  }
-                },
-                {
-                  "tag": "hr"
-                },
-                {
-                  "tag": "action",
-                  "actions": [
-                    {
-                      "tag": "button",
-                      "text": {
-                        "tag": "lark_md",
-                        "content": "查看 PR 👉"
-                      },
-                      "url": "${PR_URL}",
-                      "type": "default"
-                    }
-                  ]
-                }
-              ]
-            }
-          }
-          EOF
-          )
-          
-          # 修改获取变更文件列表的逻辑
-          if [[ "${{ github.event_name }}" == "pull_request_target" || "${{ github.event_name }}" == "pull_request_review" ]]; then
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-          elif [[ "${{ github.event_name }}" == "issue_comment" && "$IS_PR_COMMENT" == "true" ]]; then
-            # 从 issue_comment 事件中获取 PR 号码
-            PR_NUMBER=$(echo "${{ github.event.issue.pull_request.url }}" | awk -F'/' '{print $NF}')
-          fi
-          
+
+      - name: Get changed files
+        if: github.event.pull_request
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
           if [[ -n "$PR_NUMBER" ]]; then
-            echo "获取变更文件列表..."
             changed_files=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/files" --jq '.[].filename')
-            echo "变更文件列表:"
-            echo "$changed_files"
-            
-            echo "检查文件变更范围..."
-            while IFS= read -r file; do
-              echo "检查文件: $file"
-              if [[ $file == uikit/* ]]; then
-                echo "发现 UIKit 相关变更"
-                notify_uikit=true
-              elif [[ $file == core_products/zim/* ]]; then
-                echo "发现 ZIM 相关变更"
-                notify_zim=true
-              fi
-            done <<< "$changed_files"
+            echo "$changed_files" > changed_files.txt
           fi
-          
-          send_notification() {
-            local webhook_url="$1"
-            local api_key="$2"
-            local team="$3"
-            
-            echo "准备发送通知到 ${team} 团队..."
-            
-            # 直接发送请求，不进行签名验证
-            echo "发送请求到飞书机器人..."
-            response=$(curl -X POST \
-                 -H "Content-Type: application/json" \
-                 -d "$MESSAGE_CARD" \
-                 "$webhook_url")
-            echo "飞书响应: $response"
-          }
-          
-          if [[ $notify_uikit == true && -n $WEBHOOK_UIKIT && -n $API_KEY_UIKIT ]]; then
-            echo "发送通知到 UIKit 团队..."
-            send_notification "$WEBHOOK_UIKIT" "$API_KEY_UIKIT" "UIKit"
-          else
-            echo "跳过 UIKit 团队通知"
-            [[ $notify_uikit == false ]] && echo "原因: 没有相关变更"
-            [[ -z $WEBHOOK_UIKIT ]] && echo "原因: 缺少 WEBHOOK_UIKIT"
-            [[ -z $API_KEY_UIKIT ]] && echo "原因: 缺少 API_KEY_UIKIT"
-          fi
-          
-          if [[ $notify_zim == true && -n $WEBHOOK_ZIM && -n $API_KEY_ZIM ]]; then
-            echo "发送通知到 ZIM 团队..."
-            send_notification "$WEBHOOK_ZIM" "$API_KEY_ZIM" "ZIM"
-          else
-            echo "跳过 ZIM 团队通知"
-            [[ $notify_zim == false ]] && echo "原因: 没有相关变更"
-            [[ -z $WEBHOOK_ZIM ]] && echo "原因: 缺少 WEBHOOK_ZIM"
-            [[ -z $API_KEY_ZIM ]] && echo "原因: 缺少 API_KEY_ZIM"
-          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload PR info
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-info
+          path: |
+            pr_info.txt
+            changed_files.txt

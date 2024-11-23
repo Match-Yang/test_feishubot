@@ -1,0 +1,224 @@
+name: send_feishu_notification
+
+on:
+  workflow_run:
+    workflows: [prepare_pr_info]
+    types:
+      - completed
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download PR info
+        uses: actions/github-script@v6
+        with:
+          script: |
+            let allArtifacts = await github.rest.actions.listWorkflowRunArtifacts({
+               owner: context.repo.owner,
+               repo: context.repo.repo,
+               run_id: context.payload.workflow_run.id,
+            });
+            let matchArtifact = allArtifacts.data.artifacts.filter((artifact) => {
+              return artifact.name == "pr-info"
+            })[0];
+            let download = await github.rest.actions.downloadArtifact({
+               owner: context.repo.owner,
+               repo: context.repo.repo,
+               artifact_id: matchArtifact.id,
+               archive_format: 'zip',
+            });
+            let fs = require('fs');
+            fs.writeFileSync('pr-info.zip', Buffer.from(download.data));
+
+      - name: Extract PR info
+        run: |
+          unzip pr-info.zip
+          source pr_info.txt
+          
+          # 设置所有必要的环境变量
+          {
+            echo "PR_TITLE=${pr_title}"
+            echo "PR_URL=${pr_url}"
+            echo "EVENT_TYPE=${event_type}"
+            echo "PR_ACTION=${action}"
+            echo "PR_BODY=${pr_body}"
+            echo "PR_CREATOR=${pr_creator}"
+            echo "PR_MERGED=${pr_merged}"
+            echo "REVIEW_BODY=${review_body}"
+            echo "REVIEW_STATE=${review_state}"
+            echo "REVIEWER=${reviewer}"
+            echo "COMMENT_BODY=${comment_body}"
+            echo "COMMENT_USER=${comment_user}"
+          } >> $GITHUB_ENV
+
+      - name: Load user mapping
+        run: |
+          if [ -f .github/configs/user_mapping.yml ]; then
+            while IFS=: read -r github_user feishu_id || [ -n "$github_user" ]; do
+              [[ $github_user =~ ^#.*$ || -z $github_user ]] && continue
+              github_user=$(echo $github_user | tr -d ' "')
+              feishu_id=$(echo $feishu_id | tr -d ' "')
+              echo "FEISHU_${github_user}=${feishu_id}" >> $GITHUB_ENV
+            done < .github/configs/user_mapping.yml
+          fi
+
+      - name: Check notification targets
+        id: check_targets
+        run: |
+          notify_uikit=false
+          notify_zim=false
+          
+          if [ -f changed_files.txt ]; then
+            while IFS= read -r file; do
+              if [[ $file == uikit/* ]]; then
+                notify_uikit=true
+              elif [[ $file == core_products/zim/* ]]; then
+                notify_zim=true
+              fi
+            done < changed_files.txt
+          fi
+          
+          echo "notify_uikit=${notify_uikit}" >> $GITHUB_ENV
+          echo "notify_zim=${notify_zim}" >> $GITHUB_ENV
+
+      - name: Send notifications
+        env:
+          WEBHOOK_UIKIT: ${{ secrets.WEBHOOK_UIKIT }}
+          API_KEY_UIKIT: ${{ secrets.API_KEY_UIKIT }}
+          WEBHOOK_ZIM: ${{ secrets.WEBHOOK_ZIM }}
+          API_KEY_ZIM: ${{ secrets.API_KEY_ZIM }}
+        run: |
+          # 获取用户的飞书ID
+          get_feishu_id() {
+            local github_user="$1"
+            local safe_user=$(echo "${github_user}" | tr '-' '_')
+            local var_name="FEISHU_${safe_user}"
+            echo "${!var_name}"
+          }
+          
+          # 设置PR状态和额外内容
+          set_status_and_content() {
+            if [[ "$EVENT_TYPE" == "pull_request_target" ]]; then
+              if [[ "$PR_ACTION" == "opened" ]]; then
+                STATUS="🆕 新建 PR"
+                EXTRA_CONTENT="\n**描述**: ${PR_BODY}"
+              elif [[ "$PR_ACTION" == "closed" ]]; then
+                if [[ "$PR_MERGED" == "true" ]]; then
+                  STATUS="✅ PR 已合并"
+                else
+                  STATUS="❌ PR 已关闭"
+                fi
+              else
+                STATUS="🔄 PR 更新"
+              fi
+            elif [[ "$EVENT_TYPE" == "pull_request_review" ]]; then
+              REVIEWER_ID=$(get_feishu_id "$REVIEWER")
+              if [[ -n "${REVIEWER_ID}" ]]; then
+                REVIEWER_TEXT="**评审者**: <at id=${REVIEWER_ID}></at>"
+              else
+                REVIEWER_TEXT="**评审者**: ${REVIEWER}"
+              fi
+              
+              if [[ "$REVIEW_STATE" == "approved" ]]; then
+                STATUS="👍 审核通过"
+              elif [[ "$REVIEW_STATE" == "changes_requested" ]]; then
+                STATUS="📝 需要修改"
+              elif [[ "$REVIEW_STATE" == "commented" ]]; then
+                STATUS="💬 收到评审意见"
+              fi
+              EXTRA_CONTENT="\n${REVIEWER_TEXT}\n**评审意见**: ${REVIEW_BODY}"
+            elif [[ "$EVENT_TYPE" == "issue_comment" ]]; then
+              COMMENTER_ID=$(get_feishu_id "$COMMENT_USER")
+              if [[ -n "${COMMENTER_ID}" ]]; then
+                COMMENTER_TEXT="**评论者**: <at id=${COMMENTER_ID}></at>"
+              else
+                COMMENTER_TEXT="**评论者**: ${COMMENT_USER}"
+              fi
+              STATUS="💬 PR评论"
+              EXTRA_CONTENT="\n${COMMENTER_TEXT}\n**评论内容**: ${COMMENT_BODY}"
+            fi
+            
+            # 处理创建者信息
+            CREATOR_ID=$(get_feishu_id "$PR_CREATOR")
+            if [[ -n "${CREATOR_ID}" ]]; then
+              CREATOR_TEXT="**创建者**: <at id=${CREATOR_ID}></at>"
+            else
+              CREATOR_TEXT="**创建者**: ${PR_CREATOR}"
+            fi
+          }
+          
+          # 构建消息卡片
+          build_message_card() {
+            cat << EOF
+          {
+            "msg_type": "interactive",
+            "card": {
+              "header": {
+                "title": {
+                  "tag": "plain_text",
+                  "content": "${PR_TITLE}"
+                },
+                "template": "blue"
+              },
+              "elements": [
+                {
+                  "tag": "div",
+                  "text": {
+                    "tag": "lark_md",
+                    "content": "**状态**: ${STATUS}\n${CREATOR_TEXT}${EXTRA_CONTENT}"
+                  }
+                },
+                {
+                  "tag": "hr"
+                },
+                {
+                  "tag": "action",
+                  "actions": [
+                    {
+                      "tag": "button",
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "查看 PR 👉"
+                      },
+                      "url": "${PR_URL}",
+                      "type": "default"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+          EOF
+          }
+          
+          # 发送通知函数
+          send_notification() {
+            local webhook_url="$1"
+            local team="$2"
+            
+            echo "发送通知到 ${team} 团队..."
+            MESSAGE_CARD=$(build_message_card)
+            
+            response=$(curl -X POST \
+                 -H "Content-Type: application/json" \
+                 -d "$MESSAGE_CARD" \
+                 "$webhook_url")
+            echo "飞书响应: $response"
+          }
+          
+          # 设置状态和内容
+          set_status_and_content
+          
+          # 发送通知
+          if [[ $notify_uikit == true && -n $WEBHOOK_UIKIT ]]; then
+            send_notification "$WEBHOOK_UIKIT" "UIKit"
+          fi
+          
+          if [[ $notify_zim == true && -n $WEBHOOK_ZIM ]]; then
+            send_notification "$WEBHOOK_ZIM" "ZIM"
+          fi
