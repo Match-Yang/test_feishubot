@@ -38,23 +38,32 @@ jobs:
       - name: Extract PR info
         run: |
           unzip pr-info.zip
-          source pr_info.txt
-          
-          # 设置所有必要的环境变量
-          {
-            echo "PR_TITLE=${pr_title}"
-            echo "PR_URL=${pr_url}"
-            echo "EVENT_TYPE=${event_type}"
-            echo "PR_ACTION=${action}"
-            echo "PR_BODY=${pr_body}"
-            echo "PR_CREATOR=${pr_creator}"
-            echo "PR_MERGED=${pr_merged}"
-            echo "REVIEW_BODY=${review_body}"
-            echo "REVIEW_STATE=${review_state}"
-            echo "REVIEWER=${reviewer}"
-            echo "COMMENT_BODY=${comment_body}"
-            echo "COMMENT_USER=${comment_user}"
-          } >> $GITHUB_ENV
+          # 确保文件存在且有内容
+          if [ -f pr_info.txt ]; then
+            # 处理可能的特殊字符
+            sed -i 's/\r$//' pr_info.txt
+            # 源文件并设置环境变量
+            source pr_info.txt
+            
+            # 将变量导出到 GITHUB_ENV
+            {
+              echo "PR_TITLE=${pr_title}"
+              echo "PR_URL=${pr_url}"
+              echo "EVENT_TYPE=${event_type}"
+              echo "PR_ACTION=${action}"
+              echo "PR_BODY=${pr_body}"
+              echo "PR_CREATOR=${pr_creator}"
+              echo "PR_MERGED=${pr_merged}"
+              echo "REVIEW_BODY=${review_body}"
+              echo "REVIEW_STATE=${review_state}"
+              echo "REVIEWER=${reviewer}"
+              echo "COMMENT_BODY=${comment_body}"
+              echo "COMMENT_USER=${comment_user}"
+            } >> $GITHUB_ENV
+          else
+            echo "错误：找不到 pr_info.txt 文件"
+            exit 1
+          fi
 
       - name: Load user mapping
         run: |

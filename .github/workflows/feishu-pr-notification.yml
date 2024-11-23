@@ -27,32 +27,31 @@ jobs:
       - name: Prepare PR info
         id: pr_info
         run: |
-          # 准备基础信息
-          echo "event_type=${{ github.event_name }}" >> pr_info.txt
-          echo "action=${{ github.event.action }}" >> pr_info.txt
-          
-          # 根据不同事件类型获取PR信息
-          if [[ "${{ github.event_name }}" == "issue_comment" && "${{ github.event.issue.pull_request != '' }}" == "true" ]]; then
-            PR_NUMBER=$(echo "${{ github.event.issue.pull_request.url }}" | awk -F'/' '{print $NF}')
-            PR_INFO=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}")
-            echo "pr_title=${{ github.event.issue.title }}" >> pr_info.txt
-            echo "pr_url=${{ github.event.issue.pull_request.html_url }}" >> pr_info.txt
-            echo "comment_body=${{ github.event.comment.body }}" >> pr_info.txt
-            echo "comment_user=${{ github.event.comment.user.login }}" >> pr_info.txt
-          else
-            echo "pr_title=${{ github.event.pull_request.title }}" >> pr_info.txt
-            echo "pr_url=${{ github.event.pull_request.html_url }}" >> pr_info.txt
-            echo "pr_body=${{ github.event.pull_request.body }}" >> pr_info.txt
-            echo "pr_creator=${{ github.event.pull_request.user.login }}" >> pr_info.txt
-            echo "pr_merged=${{ github.event.pull_request.merged }}" >> pr_info.txt
-          fi
-          
-          # 如果是review事件,添加review信息
-          if [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
-            echo "review_body=${{ github.event.review.body }}" >> pr_info.txt
-            echo "review_state=${{ github.event.review.state }}" >> pr_info.txt
-            echo "reviewer=${{ github.event.review.user.login }}" >> pr_info.txt
-          fi
+          # 创建一个临时文件来存储信息
+          {
+            echo "export event_type='${{ github.event_name }}'"
+            echo "export action='${{ github.event.action }}'"
+            
+            if [[ "${{ github.event_name }}" == "issue_comment" && "${{ github.event.issue.pull_request != '' }}" == "true" ]]; then
+              PR_NUMBER=$(echo "${{ github.event.issue.pull_request.url }}" | awk -F'/' '{print $NF}')
+              echo "export pr_title='${{ github.event.issue.title }}'"
+              echo "export pr_url='${{ github.event.issue.pull_request.html_url }}'"
+              echo "export comment_body='${{ github.event.comment.body }}'"
+              echo "export comment_user='${{ github.event.comment.user.login }}'"
+            else
+              echo "export pr_title='${{ github.event.pull_request.title }}'"
+              echo "export pr_url='${{ github.event.pull_request.html_url }}'"
+              echo "export pr_body='${{ github.event.pull_request.body }}'"
+              echo "export pr_creator='${{ github.event.pull_request.user.login }}'"
+              echo "export pr_merged='${{ github.event.pull_request.merged }}'"
+            fi
+            
+            if [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
+              echo "export review_body='${{ github.event.review.body }}'"
+              echo "export review_state='${{ github.event.review.state }}'"
+              echo "export reviewer='${{ github.event.review.user.login }}'"
+            fi
+          } > pr_info.txt
 
       - name: Get changed files
         if: github.event.pull_request
