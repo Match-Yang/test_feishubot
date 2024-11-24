@@ -56,24 +56,24 @@ class NotificationSender:
         """设置 PR 状态和额外内容"""
         status = ""
         extra_content = ""
-        event_type = self.env.get('EVENT_TYPE', '')
+        event_type = os.environ.get('EVENT_TYPE', '')
         
         if event_type == 'pull_request_target':
-            pr_action = self.env.get('PR_ACTION', '')
+            pr_action = os.environ.get('PR_ACTION', '')
             if pr_action == 'opened':
                 status = "🆕 新建 PR"
-                extra_content = f"\n**描述**: {self.env.get('PR_BODY', '')}"
+                extra_content = f"\n**描述**: {os.environ.get('PR_BODY', '')}"
             elif pr_action == 'closed':
-                status = "✅ PR 已合并" if self.env.get('PR_MERGED') == 'true' else "❌ PR 已关闭"
+                status = "✅ PR 已合并" if os.environ.get('PR_MERGED') == 'true' else "❌ PR 已关闭"
             else:
                 status = "🔄 PR 更新"
                 
         elif event_type == 'pull_request_review':
-            reviewer = self.env.get('REVIEWER', '')
+            reviewer = os.environ.get('REVIEWER', '')
             reviewer_id = self.get_feishu_id(reviewer)
             reviewer_text = f"**评审者**: <at id={reviewer_id}></at>" if reviewer_id else f"**评审者**: {reviewer}"
             
-            review_state = self.env.get('REVIEW_STATE', '')
+            review_state = os.environ.get('REVIEW_STATE', '')
             if review_state == 'approved':
                 status = "👍 审核通过"
             elif review_state == 'changes_requested':
@@ -81,17 +81,17 @@ class NotificationSender:
             elif review_state == 'commented':
                 status = "💬 收到评审意见"
                 
-            extra_content = f"\n{reviewer_text}\n**评审意见**: {self.env.get('REVIEW_BODY', '')}"
+            extra_content = f"\n{reviewer_text}\n**评审意见**: {os.environ.get('REVIEW_BODY', '')}"
             
         elif event_type == 'issue_comment':
-            comment_user = self.env.get('COMMENT_USER', '')
+            comment_user = os.environ.get('COMMENT_USER', '')
             commenter_id = self.get_feishu_id(comment_user)
             commenter_text = f"**评论者**: <at id={commenter_id}></at>" if commenter_id else f"**评论者**: {comment_user}"
             status = "💬 PR评论"
-            extra_content = f"\n{commenter_text}\n**评论内容**: {self.env.get('COMMENT_BODY', '')}"
+            extra_content = f"\n{commenter_text}\n**评论内容**: {os.environ.get('COMMENT_BODY', '')}"
             
         # 处理创建者信息
-        creator = self.env.get('PR_CREATOR', '')
+        creator = os.environ.get('PR_CREATOR', '')
         creator_id = self.get_feishu_id(creator)
         creator_text = f"**创建者**: <at id={creator_id}></at>" if creator_id else f"**创建者**: {creator}"
         
@@ -105,7 +105,7 @@ class NotificationSender:
                 "header": {
                     "title": {
                         "tag": "plain_text",
-                        "content": self.env.get('PR_TITLE', '')
+                        "content": os.environ.get('PR_TITLE', '')
                     },
                     "template": "blue"
                 },
@@ -129,7 +129,7 @@ class NotificationSender:
                                     "tag": "lark_md",
                                     "content": "查看 PR 👉"
                                 },
-                                "url": self.env.get('PR_URL', ''),
+                                "url": os.environ.get('PR_URL', ''),
                                 "type": "default"
                             }
                         ]
