@@ -153,23 +153,51 @@ class NotificationSender:
 
     def run(self):
         """运行通知流程"""
-        webhooks_json = sys.argv[1]
-        user_mapping_json = sys.argv[2]
+        if len(sys.argv) < 3:
+            print("错误：需要两个参数 - webhooks_json 和 user_mapping_json")
+            sys.exit(1)
         
-        self.load_user_mapping(user_mapping_json)
-        notify_targets = self.check_notification_targets(
-            webhooks_json,
-            'changed_files.txt'
-        )
-        
-        # 发送通知
-        for webhook_env_name in notify_targets:
-            print(f"webhook_env_name: {webhook_env_name}")
-            webhook_url = os.environ.get(webhook_env_name)
-            if webhook_url:
-                self.send_notification(webhook_url)
-            else:
-                print(f"警告：找不到环境变量 {webhook_env_name}")
+        try:
+            webhooks_json = sys.argv[1]
+            user_mapping_json = sys.argv[2]
+            
+            # 验证JSON格式
+            try:
+                json.loads(webhooks_json)
+            except json.JSONDecodeError as e:
+                print(f"webhooks_json 格式错误: {e}")
+                print(f"收到的webhooks_json: {webhooks_json}")
+                sys.exit(1)
+            
+            try:
+                json.loads(user_mapping_json)
+            except json.JSONDecodeError as e:
+                print(f"user_mapping_json 格式错误: {e}")
+                print(f"收到的user_mapping_json: {user_mapping_json}")
+                sys.exit(1)
+            
+            self.load_user_mapping(user_mapping_json)
+            notify_targets = self.check_notification_targets(
+                webhooks_json,
+                'changed_files.txt'
+            )
+            
+            if not notify_targets:
+                print("没有找到需要通知的目标")
+                return
+            
+            # 发送通知
+            for webhook_env_name in notify_targets:
+                print(f"webhook_env_name: {webhook_env_name}")
+                webhook_url = os.environ.get(webhook_env_name)
+                if webhook_url:
+                    self.send_notification(webhook_url)
+                else:
+                    print(f"警告：找不到环境变量 {webhook_env_name}")
+                
+        except Exception as e:
+            print(f"运行过程中发生错误: {e}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     sender = NotificationSender()
