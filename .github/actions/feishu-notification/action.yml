@@ -1,0 +1,78 @@
+name: 'Feishu PR Notification Action'
+description: '发送飞书通知的可复用 Action'
+inputs:
+  webhooks:
+    description: 'JSON 格式的 webhook 配置，key 为目标名称，value 为对应的 webhook URL'
+    required: true
+  user_mapping:
+    description: 'GitHub 用户名到飞书用户 ID 的映射关系'
+    required: true
+  pr_info_artifact_name:
+    description: 'PR 信息 artifact 的名称'
+    required: false
+    default: 'pr-info'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+        
+    - name: Install dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    - name: Download PR info
+      uses: actions/github-script@v6
+      with:
+        script: |
+          let allArtifacts = await github.rest.actions.listWorkflowRunArtifacts({
+             owner: context.repo.owner,
+             repo: context.repo.repo,
+             run_id: context.payload.workflow_run.id,
+          });
+          let matchArtifact = allArtifacts.data.artifacts.filter((artifact) => {
+            return artifact.name == "${{ inputs.pr_info_artifact_name }}"
+          })[0];
+          let download = await github.rest.actions.downloadArtifact({
+             owner: context.repo.owner,
+             repo: context.repo.repo,
+             artifact_id: matchArtifact.id,
+             archive_format: 'zip',
+          });
+          let fs = require('fs');
+          fs.writeFileSync('pr-info.zip', Buffer.from(download.data));
+
+    - name: Extract PR info
+      shell: bash
+      run: |
+        unzip pr-info.zip
+        if [ -f pr_info.txt ]; then
+          sed -i 's/\r$//' pr_info.txt
+          source pr_info.txt
+          {
+            echo "PR_TITLE=${pr_title}"
+            echo "PR_URL=${pr_url}"
+            echo "EVENT_TYPE=${event_type}"
+            echo "PR_ACTION=${action}"
+            echo "PR_BODY=${pr_body}"
+            echo "PR_CREATOR=${pr_creator}"
+            echo "PR_MERGED=${pr_merged}"
+            echo "REVIEW_BODY=${review_body}"
+            echo "REVIEW_STATE=${review_state}"
+            echo "REVIEWER=${reviewer}"
+            echo "COMMENT_BODY=${comment_body}"
+            echo "COMMENT_USER=${comment_user}"
+          } >> $GITHUB_ENV
+        else
+          echo "错误：找不到 pr_info.txt 文件"
+          exit 1
+        fi
+
+    - name: Send notifications
+      shell: bash
+      run: python ${{ github.action_path }}/send_notification.py "${{ inputs.webhooks }}" "${{ inputs.user_mapping }}"
