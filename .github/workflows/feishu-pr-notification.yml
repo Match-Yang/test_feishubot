@@ -27,6 +27,7 @@ jobs:
       - name: Prepare PR info
         id: pr_info
         run: |
+          python -V
           # 创建一个临时文件来存储信息
           {
             echo "export event_type='${{ github.event_name }}'"
