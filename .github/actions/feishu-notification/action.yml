@@ -75,4 +75,4 @@ runs:
 
     - name: Send notifications
       shell: bash
-      run: python ${{ github.action_path }}/send_notification.py "${{ inputs.webhooks }}" "${{ inputs.user_mapping }}"
+      run: python ${{ github.action_path }}/send_notification.py '${{ inputs.webhooks }}' '${{ inputs.user_mapping }}'
