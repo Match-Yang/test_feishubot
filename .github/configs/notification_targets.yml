@@ -1,3 +1,0 @@
-targets:
-  "uikit/": "WEBHOOK_UIKIT"
-  "core_products/zim/": "WEBHOOK_ZIM"

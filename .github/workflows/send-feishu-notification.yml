@@ -14,6 +14,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
       - name: Download PR info
         uses: actions/github-script@v6
         with:
@@ -38,14 +43,9 @@ jobs:
       - name: Extract PR info
         run: |
           unzip pr-info.zip
-          # 确保文件存在且有内容
           if [ -f pr_info.txt ]; then
-            # 处理可能的特殊字符
             sed -i 's/\r$//' pr_info.txt
-            # 源文件并设置环境变量
             source pr_info.txt
-            
-            # 将变量导出到 GITHUB_ENV
             {
               echo "PR_TITLE=${pr_title}"
               echo "PR_URL=${pr_url}"
@@ -65,196 +65,8 @@ jobs:
             exit 1
           fi
 
-      - name: Load user mapping
-        id: mapping
-        run: |
-          echo "开始加载用户映射..."
-          if [ -f .github/configs/user_mapping.yml ]; then
-            cat .github/configs/user_mapping.yml
-            while IFS=: read -r github_user feishu_id || [ -n "$github_user" ]; do
-              [[ $github_user =~ ^#.*$ || -z $github_user ]] && continue
-              github_user=$(echo $github_user | tr -d ' "')
-              feishu_id=$(echo $feishu_id | tr -d ' "')
-              echo "映射: GitHub用户 ${github_user} -> 飞书用户 ${feishu_id}"
-              echo "FEISHU_${github_user}=${feishu_id}" >> $GITHUB_ENV
-            done < .github/configs/user_mapping.yml
-          else
-            echo "警告: 用户映射文件不存在"
-          fi
-
-      - name: Check notification targets
-        id: check_targets
-        run: |
-          # 初始化一个关联数组来存储通知标记
-          declare -A notify_targets
-          
-          if [ -f .github/configs/notification_targets.yml ]; then
-            # 读取配置文件，跳过注释和空行
-            while IFS=: read -r path webhook || [ -n "$path" ]; do
-              [[ $path =~ ^[[:space:]]*# ]] && continue  # 跳过注释
-              [[ -z "${path// }" ]] && continue  # 跳过空行
-              
-              # 清理输入
-              path=$(echo "$path" | tr -d ' "')
-              webhook=$(echo "$webhook" | tr -d ' "')
-              
-              # 跳过非目标配置行
-              [[ "$path" == "targets" ]] && continue
-              
-              echo "检查目录: $path -> $webhook"
-              notify_targets["$path"]="$webhook"
-            done < .github/configs/notification_targets.yml
-          fi
-          
-          # 检查变更文件
-          if [ -f changed_files.txt ]; then
-            while IFS= read -r file; do
-              for path in "${!notify_targets[@]}"; do
-                if [[ $file == $path* ]]; then
-                  webhook_var="${notify_targets[$path]}"
-                  echo "notify_${webhook_var,,}=true" >> $GITHUB_ENV
-                  echo "发现 ${path} 相关变更，将通知 ${webhook_var}"
-                fi
-              done
-            done < changed_files.txt
-          fi
-
       - name: Send notifications
         env:
           WEBHOOK_UIKIT: ${{ secrets.WEBHOOK_UIKIT }}
           WEBHOOK_ZIM: ${{ secrets.WEBHOOK_ZIM }}
-          # 在这里添加新的 webhook 环境变量
-          # WEBHOOK_DOCS: ${{ secrets.WEBHOOK_DOCS }}
-          # WEBHOOK_FE: ${{ secrets.WEBHOOK_FE }}
-          # WEBHOOK_BE: ${{ secrets.WEBHOOK_BE }}
-        run: |
-          # 获取用户的飞书ID
-          get_feishu_id() {
-            local github_user="$1"
-            local safe_user=$(echo "${github_user}" | tr '-' '_')
-            local var_name="FEISHU_${safe_user}"
-            echo "${!var_name}"
-          }
-          
-          # 设置PR状态和额外内容
-          set_status_and_content() {
-            if [[ "$EVENT_TYPE" == "pull_request_target" ]]; then
-              if [[ "$PR_ACTION" == "opened" ]]; then
-                STATUS="🆕 新建 PR"
-                EXTRA_CONTENT="\n**描述**: ${PR_BODY}"
-              elif [[ "$PR_ACTION" == "closed" ]]; then
-                if [[ "$PR_MERGED" == "true" ]]; then
-                  STATUS="✅ PR 已合并"
-                else
-                  STATUS="❌ PR 已关闭"
-                fi
-              else
-                STATUS="🔄 PR 更新"
-              fi
-            elif [[ "$EVENT_TYPE" == "pull_request_review" ]]; then
-              REVIEWER_ID=$(get_feishu_id "$REVIEWER")
-              echo "REVIEWER_ID: ${REVIEWER_ID}"
-              if [[ -n "${REVIEWER_ID}" ]]; then
-                REVIEWER_TEXT="**评审者**: <at id=${REVIEWER_ID}></at>"
-              else
-                REVIEWER_TEXT="**评审者**: ${REVIEWER}"
-              fi
-              
-              if [[ "$REVIEW_STATE" == "approved" ]]; then
-                STATUS="👍 审核通过"
-              elif [[ "$REVIEW_STATE" == "changes_requested" ]]; then
-                STATUS="📝 需要修改"
-              elif [[ "$REVIEW_STATE" == "commented" ]]; then
-                STATUS="💬 收到评审意见"
-              fi
-              EXTRA_CONTENT="\n${REVIEWER_TEXT}\n**评审意见**: ${REVIEW_BODY}"
-            elif [[ "$EVENT_TYPE" == "issue_comment" ]]; then
-              COMMENTER_ID=$(get_feishu_id "$COMMENT_USER")
-              if [[ -n "${COMMENTER_ID}" ]]; then
-                COMMENTER_TEXT="**评论者**: <at id=${COMMENTER_ID}></at>"
-              else
-                COMMENTER_TEXT="**评论者**: ${COMMENT_USER}"
-              fi
-              STATUS="💬 PR评论"
-              EXTRA_CONTENT="\n${COMMENTER_TEXT}\n**评论内容**: ${COMMENT_BODY}"
-            fi
-            
-            # 处理创建者信息
-            CREATOR_ID=$(get_feishu_id "$PR_CREATOR")
-            if [[ -n "${CREATOR_ID}" ]]; then
-              CREATOR_TEXT="**创建者**: <at id=${CREATOR_ID}></at>"
-            else
-              CREATOR_TEXT="**创建者**: ${PR_CREATOR}"
-            fi
-          }
-          
-          # 构建消息卡片
-          build_message_card() {
-            cat << EOF
-          {
-            "msg_type": "interactive",
-            "card": {
-              "header": {
-                "title": {
-                  "tag": "plain_text",
-                  "content": "${PR_TITLE}"
-                },
-                "template": "blue"
-              },
-              "elements": [
-                {
-                  "tag": "div",
-                  "text": {
-                    "tag": "lark_md",
-                    "content": "**状态**: ${STATUS}\n${CREATOR_TEXT}${EXTRA_CONTENT}"
-                  }
-                },
-                {
-                  "tag": "hr"
-                },
-                {
-                  "tag": "action",
-                  "actions": [
-                    {
-                      "tag": "button",
-                      "text": {
-                        "tag": "lark_md",
-                        "content": "查看 PR 👉"
-                      },
-                      "url": "${PR_URL}",
-                      "type": "default"
-                    }
-                  ]
-                }
-              ]
-            }
-          }
-          EOF
-          }
-          
-          # 发送通知函数
-          send_notification() {
-            local webhook_url="$1"
-            local team="$2"
-            
-            echo "发送通知到 ${team} 团队..."
-            MESSAGE_CARD=$(build_message_card)
-            
-            response=$(curl -X POST \
-                 -H "Content-Type: application/json" \
-                 -d "$MESSAGE_CARD" \
-                 "$webhook_url")
-            echo "飞书响应: $response"
-          }
-          
-          # 设置状态和内容
-          set_status_and_content
-          
-          # 发送通知
-          for webhook_var in $(env | grep '^WEBHOOK_' | cut -d= -f1); do
-            notify_flag="notify_${webhook_var,,}"  # 转换为小写
-            if [[ "${!notify_flag}" == "true" && -n "${!webhook_var}" ]]; then
-              team="${webhook_var#WEBHOOK_}"  # 移除 WEBHOOK_ 前缀
-              send_notification "${!webhook_var}" "$team"
-            fi
-          done
+        run: python .github/scripts/send_notification.py
