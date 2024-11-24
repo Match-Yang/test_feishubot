@@ -29,11 +29,11 @@ class NotificationSender:
                 with open(changed_files_path, 'r') as cf:
                     changed_files = cf.read().splitlines()
                     
-                for path, webhook in webhooks_config.items():
+                for path, webhook_url in webhooks_config.items():
                     for changed_file in changed_files:
                         if changed_file.startswith(path):
-                            notify_targets[webhook] = True
-                            print(f"发现 {path} 相关变更，将通知 {webhook}")
+                            notify_targets[webhook_url] = True
+                            print(f"发现 {path} 相关变更，将通知对应webhook")
         except Exception as e:
             print(f"检查通知目标出错: {e}")
             
@@ -187,13 +187,9 @@ class NotificationSender:
                 return
             
             # 发送通知
-            for webhook_env_name in notify_targets:
-                print(f"webhook_env_name: {webhook_env_name}")
-                webhook_url = os.environ.get(webhook_env_name)
-                if webhook_url:
-                    self.send_notification(webhook_url)
-                else:
-                    print(f"警告：找不到环境变量 {webhook_env_name}")
+            for webhook_url in notify_targets:
+                print(f"正在发送通知到webhook")
+                self.send_notification(webhook_url)
                 
         except Exception as e:
             print(f"运行过程中发生错误: {e}")
